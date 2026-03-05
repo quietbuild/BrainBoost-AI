@@ -205,14 +205,24 @@ async function generate(question) {
     const cfg    = MODELS[currentMode];
     const prompt = buildPrompt(question, currentMode);
 
-    const output = await pipe(prompt, {
-      max_new_tokens:     cfg.maxNewTokens,
-      temperature:        currentMode === "fast" ? 0.7 : 0.65,
-      repetition_penalty: 1.25,
-      do_sample:          true,
-      top_k:              50,
-      top_p:              0.92,
-    });
+    // Flan-T5 (fast) must use greedy decoding — do_sample causes
+    // "offset is out of bounds" crashes on short inputs in Transformers.js v2.
+    // TinyLlama (smart) is fine with sampling.
+    const genOpts = currentMode === "fast"
+      ? {
+          max_new_tokens: cfg.maxNewTokens,
+          do_sample:      false,
+        }
+      : {
+          max_new_tokens:     cfg.maxNewTokens,
+          do_sample:          true,
+          temperature:        0.65,
+          top_k:              40,
+          top_p:              0.90,
+          repetition_penalty: 1.3,
+        };
+
+    const output = await pipe(prompt, genOpts);
 
     const ms     = performance.now() - t0;
     const answer = extractAnswer(output, currentMode);
