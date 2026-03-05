@@ -1,357 +1,301 @@
 /**
  * BrainBoost AI — app.js
- * Private on-device chatbot with conversation memory.
- * Fast  → Xenova/flan-t5-base              text2text-generation (~250 MB)
- * Smart → Xenova/TinyLlama-1.1B-Chat-v1.0  text-generation      (~600 MB)
- * Created by Vrishab Varun
+ * Private on-device chatbot · Created by Vrishab Varun
+ *
+ * Fast  → Xenova/flan-t5-base              (~250 MB)  text2text-generation
+ * Smart → Xenova/TinyLlama-1.1B-Chat-v1.0  (~600 MB)  text-generation
+ *
+ * Models are quantized ONNX and cached in the browser after first download.
+ * No data ever leaves your device.
  */
 
-const TRANSFORMERS_URL =
+const TRANSFORMERS_CDN =
   "https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js";
 
 const MODELS = {
   fast: {
-    id: "Xenova/flan-t5-base",
+    id:   "Xenova/flan-t5-base",
     task: "text2text-generation",
-    label: "Flan-T5",
+    name: "Flan-T5",
     icon: "⚡",
     size: "~250 MB",
-    maxNewTokens: 200,
+    maxTokens: 200,
   },
   smart: {
-    id: "Xenova/TinyLlama-1.1B-Chat-v1.0",
+    id:   "Xenova/TinyLlama-1.1B-Chat-v1.0",
     task: "text-generation",
-    label: "TinyLlama",
+    name: "TinyLlama",
     icon: "🧠",
     size: "~600 MB",
-    maxNewTokens: 300,
+    maxTokens: 300,
   },
 };
 
-const MODE_HINTS = {
-  fast:  "⚡ Fast mode · Flan-T5",
-  smart: "🧠 Smart mode · TinyLlama Chat",
+const MAX_TURNS = 4; // conversation memory (turns kept in context)
+
+// ── State ────────────────────────────────────────────────────────
+let mode        = "fast";
+let busy        = false;
+let hasGPU      = false;
+let lib         = null;   // Transformers.js module
+const pipes     = {};     // loaded pipelines
+const history   = [];     // [{role, content}, ...]
+
+// ── DOM — IDs must exactly match index.html ───────────────────────
+const el = {
+  chat:     document.getElementById("chat"),
+  welcome:  document.getElementById("welcome"),
+  msg:      document.getElementById("msg"),         // textarea
+  sendBtn:  document.getElementById("send-btn"),
+  dlBar:    document.getElementById("dl-bar"),
+  dlText:   document.getElementById("dl-text"),
+  dlFill:   document.getElementById("dl-fill"),
+  dlPct:    document.getElementById("dl-pct"),
+  btnFast:  document.getElementById("btn-fast"),
+  btnSmart: document.getElementById("btn-smart"),
+  gpuBadge: document.getElementById("gpu-badge"),
+  clearBtn: document.getElementById("clear-btn"),
+  modeHint: document.getElementById("mode-hint"),
 };
 
-// Max conversation turns to keep in context (each turn = 1 user + 1 AI message)
-const MAX_HISTORY_TURNS = 4;
-
-// ── State ───────────────────────────────────────────────────────
-let currentMode     = "fast";
-let isGenerating    = false;
-let hasWebGPU       = false;
-const pipelines     = {};
-let transformersLib = null;
-
-// conversationHistory: [{role:"user"|"assistant", content:string}, ...]
-const conversationHistory = [];
-
-// ── DOM ─────────────────────────────────────────────────────────
-const $ = (id) => document.getElementById(id);
-const ui = {
-  chatWindow: $("chat-window"),
-  emptyState: $("empty-state"),
-  q:          $("q"),
-  sendBtn:    $("send-btn"),
-  modelBar:   $("model-bar"),
-  barText:    $("bar-text"),
-  barFill:    $("bar-fill"),
-  barPct:     $("bar-pct"),
-  btnFast:    $("btn-fast"),
-  btnSmart:   $("btn-smart"),
-  gpuPill:    $("gpu-pill"),
-  clearChat:  $("clear-chat"),
-  modeHint:   $("mode-hint"),
-};
-
-// ── WebGPU ──────────────────────────────────────────────────────
-async function detectWebGPU() {
+// ── WebGPU ───────────────────────────────────────────────────────
+async function detectGPU() {
   try {
     if (!("gpu" in navigator)) return;
-    const adapter = await navigator.gpu.requestAdapter();
-    if (adapter) { hasWebGPU = true; ui.gpuPill.hidden = false; }
-  } catch { /* not available */ }
+    const a = await navigator.gpu.requestAdapter();
+    if (a) { hasGPU = true; el.gpuBadge.hidden = false; }
+  } catch { /* unavailable */ }
 }
 
-// ── Transformers.js library (loaded once) ───────────────────────
-async function loadLibrary() {
-  if (transformersLib) return transformersLib;
-  transformersLib = await import(TRANSFORMERS_URL);
-  transformersLib.env.allowLocalModels = false;
-  transformersLib.env.useBrowserCache  = true;
-  return transformersLib;
+// ── Transformers.js (loaded once from CDN) ───────────────────────
+async function getLib() {
+  if (lib) return lib;
+  lib = await import(TRANSFORMERS_CDN);
+  lib.env.allowLocalModels = false;
+  lib.env.useBrowserCache  = true;
+  return lib;
 }
 
-// ── Download progress ───────────────────────────────────────────
+// ── Download progress ─────────────────────────────────────────────
 function onProgress(ev) {
-  showBar(true);
+  showDL(true);
   const { status, progress, loaded, total, file } = ev;
   if (status === "initiate") {
-    ui.barText.textContent = `⬇ Fetching ${file ?? "model"}…`;
-    setFill(0); ui.barPct.textContent = "";
+    el.dlText.textContent = `⬇ Fetching ${file ?? "model"}…`;
+    fillDL(0); el.dlPct.textContent = "";
   } else if (status === "download" || status === "progress") {
     const pct = progress != null ? progress : (total > 0 ? (loaded / total) * 100 : 0);
-    setFill(pct);
-    ui.barPct.textContent = (loaded && total)
-      ? `${(loaded/1e6).toFixed(0)}/${(total/1e6).toFixed(0)} MB`
-      : pct > 0 ? `${pct.toFixed(0)}%` : "";
+    fillDL(pct);
+    el.dlPct.textContent = (loaded && total && total > 0)
+      ? `${(loaded/1e6).toFixed(0)} / ${(total/1e6).toFixed(0)} MB`
+      : (pct > 0 ? `${pct.toFixed(0)}%` : "");
   } else if (status === "done") {
-    setFill(100);
-    ui.barText.textContent = "✓ Model ready!";
-    ui.barPct.textContent = "";
-    setTimeout(() => showBar(false), 1000);
+    fillDL(100);
+    el.dlText.textContent = "✓ Ready!";
+    el.dlPct.textContent  = "";
+    setTimeout(() => showDL(false), 1000);
   }
 }
+function fillDL(pct) { el.dlFill.style.width = `${Math.min(100, Math.max(0, pct))}%`; }
+function showDL(v)   { el.dlBar.classList.toggle("dl-bar--hidden", !v); }
 
-function setFill(pct) {
-  ui.barFill.style.width = `${Math.max(0, Math.min(100, pct))}%`;
-}
-
-// ── Load model (lazy, cached) ───────────────────────────────────
-async function loadModel(mode) {
-  if (pipelines[mode]) return pipelines[mode];
-  const cfg  = MODELS[mode];
-  const lib  = await loadLibrary();
-  showBar(true);
-  ui.barText.textContent = `🧠 Loading ${cfg.label}…`;
-  setFill(4);
-  ui.barPct.textContent = cfg.size;
-  const device = (mode === "smart" && hasWebGPU) ? "webgpu" : "wasm";
-  const pipe   = await lib.pipeline(cfg.task, cfg.id, {
+// ── Model loading (lazy + cached) ────────────────────────────────
+async function loadPipe(m) {
+  if (pipes[m]) return pipes[m];
+  const cfg = MODELS[m];
+  const api = await getLib();
+  showDL(true);
+  el.dlText.textContent = `🧠 Loading ${cfg.name}…`;
+  fillDL(4); el.dlPct.textContent = cfg.size;
+  const device = (m === "smart" && hasGPU) ? "webgpu" : "wasm";
+  const pipe   = await api.pipeline(cfg.task, cfg.id, {
     progress_callback: onProgress, device,
   });
-  pipelines[mode] = pipe;
-  showBar(false);
+  pipes[m] = pipe;
+  showDL(false);
   return pipe;
 }
 
-// ── Prompt builder — includes conversation memory ───────────────
-function buildPrompt(question, mode) {
-  // Keep last MAX_HISTORY_TURNS turns (2 messages per turn)
-  const history = conversationHistory.slice(-(MAX_HISTORY_TURNS * 2));
+// ── Prompt building (includes memory) ────────────────────────────
+function buildPrompt(question, m) {
+  const hist = history.slice(-(MAX_TURNS * 2));
 
-  if (mode === "smart") {
-    // TinyLlama ChatML format with full history
-    let prompt =
-      `<|system|>\nYou are BrainBoost AI, a friendly and helpful private assistant. ` +
-      `Give clear, concise, conversational answers. Remember what was said earlier.</s>\n`;
-    for (const msg of history) {
-      if (msg.role === "user") {
-        prompt += `<|user|>\n${msg.content}</s>\n<|assistant|>\n`;
-      } else {
-        prompt += `${msg.content}</s>\n`;
-      }
+  if (m === "smart") {
+    let p = `<|system|>\nYou are BrainBoost AI, a friendly and helpful private assistant. Give clear, concise, conversational answers.</s>\n`;
+    for (const msg of hist) {
+      if (msg.role === "user")
+        p += `<|user|>\n${msg.content}</s>\n<|assistant|>\n`;
+      else
+        p += `${msg.content}</s>\n`;
     }
-    prompt += `<|user|>\n${question}</s>\n<|assistant|>\n`;
-    return prompt;
+    p += `<|user|>\n${question}</s>\n<|assistant|>\n`;
+    return p;
   }
 
-  // Fast mode (Flan-T5 seq2seq) — prepend plain-text context
-  let context = "";
-  if (history.length > 0) {
-    context = "Previous conversation:\n";
-    for (const msg of history) {
-      context += msg.role === "user"
-        ? `User: ${msg.content}\n`
-        : `Assistant: ${msg.content}\n`;
-    }
-    context += "\n";
+  // Flan-T5 plain-text with optional context
+  let ctx = "";
+  if (hist.length > 0) {
+    ctx = "Previous conversation:\n";
+    for (const msg of hist)
+      ctx += `${msg.role === "user" ? "User" : "Assistant"}: ${msg.content}\n`;
+    ctx += "\n";
   }
-  return `${context}Answer clearly and helpfully: ${question}`;
+  return `${ctx}Answer clearly and helpfully: ${question}`;
 }
 
-function extractAnswer(output, mode) {
-  if (mode === "fast") {
-    return (Array.isArray(output)
-      ? output[0]?.generated_text
-      : output?.generated_text ?? "").trim();
+function extractAnswer(out, m) {
+  if (m === "fast") {
+    return (Array.isArray(out) ? out[0]?.generated_text : out?.generated_text ?? "").trim();
   }
-  // TinyLlama — strip everything before the last <|assistant|>
-  const full = (Array.isArray(output)
-    ? output[0]?.generated_text
-    : output?.generated_text ?? "").trim();
-  const marker = "<|assistant|>\n";
-  const idx    = full.lastIndexOf(marker);
-  let answer   = idx !== -1 ? full.slice(idx + marker.length) : full;
-  answer       = answer.split("</s>")[0].split("<|")[0].trim();
-  return answer;
+  const full = (Array.isArray(out) ? out[0]?.generated_text : out?.generated_text ?? "").trim();
+  const mark = "<|assistant|>\n";
+  const i    = full.lastIndexOf(mark);
+  let ans    = i !== -1 ? full.slice(i + mark.length) : full;
+  ans        = ans.split("</s>")[0].split("<|")[0].trim();
+  return ans;
 }
 
-// ── Chat UI ─────────────────────────────────────────────────────
+// ── Chat UI ───────────────────────────────────────────────────────
+function hideWelcome() { el.welcome.style.display = "none"; }
 
-function setEmptyVisible(v) {
-  ui.emptyState.style.display = v ? "flex" : "none";
-}
-
-function addBubble(role, initialText) {
-  setEmptyVisible(false);
-
-  const group    = document.createElement("div");
+function addBubble(role, text) {
+  hideWelcome();
+  const group = document.createElement("div");
   group.className = `msg-group msg-group--${role}`;
-  group.dataset.mode = currentMode;
 
-  const sender    = document.createElement("div");
+  const sender = document.createElement("div");
   sender.className = "msg-sender";
   sender.textContent = role === "user"
     ? "You"
-    : `${MODELS[currentMode].icon} BrainBoost · ${MODELS[currentMode].label}`;
+    : `${MODELS[mode].icon} BrainBoost · ${MODELS[mode].name}`;
 
-  const bubble    = document.createElement("div");
+  const bubble = document.createElement("div");
   bubble.className = `bubble bubble--${role}`;
 
-  if (initialText === "TYPING") {
+  if (text === "__typing__") {
     bubble.innerHTML = '<div class="typing-dots"><span></span><span></span><span></span></div>';
   } else {
-    bubble.textContent = initialText;
+    bubble.textContent = text;
   }
 
-  const meta    = document.createElement("div");
+  const meta = document.createElement("div");
   meta.className = "bubble-meta";
-  meta.textContent = timestamp();
+  meta.textContent = now();
 
-  group.appendChild(sender);
-  group.appendChild(bubble);
-  group.appendChild(meta);
-  ui.chatWindow.appendChild(group);
-  scrollToBottom();
-
-  return { group, bubble, meta };
+  group.append(sender, bubble, meta);
+  el.chat.appendChild(group);
+  scrollDown();
+  return { bubble, meta };
 }
 
-function typewriteBubble(bubble, text, onDone) {
-  bubble.innerHTML = ""; // clear typing dots
-  const STEP = 4;
+function typewrite(bubble, text, onDone) {
+  bubble.innerHTML = "";
   let i = 0;
   function tick() {
     if (i >= text.length) { onDone?.(); return; }
-    bubble.textContent += text.slice(i, i + STEP);
-    i += STEP;
-    scrollToBottom();
+    bubble.textContent += text.slice(i, i + 5);
+    i += 5;
+    scrollDown();
     requestAnimationFrame(tick);
   }
   requestAnimationFrame(tick);
 }
 
-function scrollToBottom() {
-  ui.chatWindow.scrollTop = ui.chatWindow.scrollHeight;
-}
+function scrollDown() { el.chat.scrollTop = el.chat.scrollHeight; }
+function now() { return new Date().toLocaleTimeString([], { hour:"2-digit", minute:"2-digit" }); }
 
-function timestamp() {
-  return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-}
-
-// ── Main generate ───────────────────────────────────────────────
+// ── Generate ──────────────────────────────────────────────────────
 async function generate(question) {
-  if (isGenerating || !question.trim()) return;
+  if (busy || !question.trim()) return;
+  busy = true;
+  lockInput(true);
 
-  isGenerating = true;
-  setInputDisabled(true);
-
-  // Show user bubble
   addBubble("user", question);
+  history.push({ role: "user", content: question });
 
-  // Save to history
-  conversationHistory.push({ role: "user", content: question });
-
-  // Show AI typing indicator
-  const { bubble: aiBubble, meta: aiMeta } = addBubble("ai", "TYPING");
-
+  const { bubble: aiBubble, meta: aiMeta } = addBubble("ai", "__typing__");
   const t0 = performance.now();
 
   try {
-    const pipe   = await loadModel(currentMode);
-    const cfg    = MODELS[currentMode];
-    const prompt = buildPrompt(question, currentMode);
+    const pipe  = await loadPipe(mode);
+    const cfg   = MODELS[mode];
+    const prompt = buildPrompt(question, mode);
 
-    // Flan-T5 must use greedy (do_sample:false) to avoid "offset out of bounds" crash
-    const genOpts = currentMode === "fast"
-      ? { max_new_tokens: cfg.maxNewTokens, do_sample: false }
+    // Flan-T5 MUST use greedy (do_sample:false) — sampling crashes on short inputs
+    const opts = mode === "fast"
+      ? { max_new_tokens: cfg.maxTokens, do_sample: false }
       : {
-          max_new_tokens:     cfg.maxNewTokens,
-          do_sample:          true,
-          temperature:        0.65,
-          top_k:              40,
-          top_p:              0.90,
-          repetition_penalty: 1.3,
+          max_new_tokens: cfg.maxTokens,
+          do_sample: true, temperature: 0.65,
+          top_k: 40, top_p: 0.9, repetition_penalty: 1.3,
         };
 
-    const output = await pipe(prompt, genOpts);
+    const out    = await pipe(prompt, opts);
     const ms     = performance.now() - t0;
-    const answer = extractAnswer(output, currentMode);
-    const text   = answer || "Hmm, I couldn't come up with a good answer. Could you rephrase?";
+    const answer = extractAnswer(out, mode);
+    const text   = answer || "Hmm, I couldn't come up with a good answer — try rephrasing?";
 
-    // Typewrite the answer
-    typewriteBubble(aiBubble, text, () => {
+    typewrite(aiBubble, text, () => {
       const words = text.split(/\s+/).filter(Boolean).length;
       aiMeta.textContent =
-        `${timestamp()} · ${cfg.label} · ${(ms/1000).toFixed(1)}s · ~${((words/ms)*1000).toFixed(0)} tok/s`;
+        `${now()} · ${cfg.name} · ${(ms/1000).toFixed(1)}s · ~${((words/ms)*1000).toFixed(0)} tok/s`;
     });
 
-    // Save AI response to history
-    conversationHistory.push({ role: "assistant", content: text });
-
-    // Trim history to avoid context overflow
-    while (conversationHistory.length > MAX_HISTORY_TURNS * 2 + 2) {
-      conversationHistory.splice(0, 2);
-    }
+    history.push({ role: "assistant", content: text });
+    // Trim old turns
+    while (history.length > (MAX_TURNS + 1) * 2) history.splice(0, 2);
 
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
-    aiBubble.innerHTML = `<span style="color:#f59e0b">⚠ ${esc(msg)}</span>`;
+    aiBubble.innerHTML = `<span style="color:var(--amber)">⚠ ${esc(err?.message ?? err)}</span>`;
     console.error("[BrainBoost]", err);
   } finally {
-    isGenerating = false;
-    setInputDisabled(false);
-    ui.q.focus();
+    busy = false;
+    lockInput(false);
+    el.msg.focus();
   }
 }
 
-// ── Mode switch ─────────────────────────────────────────────────
-function switchMode(mode) {
-  if (mode === currentMode) return;
-  currentMode = mode;
-  ui.btnFast.classList.toggle("mode-btn--active",  mode === "fast");
-  ui.btnSmart.classList.toggle("mode-btn--active", mode === "smart");
-  ui.btnFast.setAttribute("aria-pressed",  String(mode === "fast"));
-  ui.btnSmart.setAttribute("aria-pressed", String(mode === "smart"));
-  ui.modeHint.textContent = MODE_HINTS[mode];
+// ── Mode switch ───────────────────────────────────────────────────
+function switchMode(m) {
+  if (m === mode) return;
+  mode = m;
+  el.btnFast.classList.toggle("mode-btn--on",  m === "fast");
+  el.btnSmart.classList.toggle("mode-btn--on", m === "smart");
+  el.btnFast.setAttribute("aria-pressed",  String(m === "fast"));
+  el.btnSmart.setAttribute("aria-pressed", String(m === "smart"));
+  el.modeHint.textContent = m === "fast"
+    ? "⚡ Fast · Flan-T5"
+    : "🧠 Smart · TinyLlama";
 
-  // Small mode-change notice in chat (only if chat is active)
-  if (ui.emptyState.style.display === "none") {
-    const notice = document.createElement("div");
-    notice.style.cssText =
-      "text-align:center;font-size:.65rem;color:var(--text3);" +
-      "font-family:'JetBrains Mono',monospace;padding:4px 0 8px;letter-spacing:.04em;";
-    notice.textContent = mode === "fast"
+  // Show a small in-chat notice (only if there are messages)
+  if (el.welcome.style.display === "none") {
+    const n = document.createElement("div");
+    n.className = "mode-notice";
+    n.textContent = m === "fast"
       ? "⚡ Switched to Fast mode (Flan-T5)"
       : "🧠 Switched to Smart mode (TinyLlama)";
-    ui.chatWindow.appendChild(notice);
-    scrollToBottom();
+    el.chat.appendChild(n);
+    scrollDown();
   }
 
-  loadModel(mode).catch(console.error);
+  loadPipe(m).catch(console.error);
 }
 
-// ── Clear chat ──────────────────────────────────────────────────
+// ── Clear chat ─────────────────────────────────────────────────────
 function clearChat() {
-  Array.from(ui.chatWindow.children).forEach((child) => {
-    if (child.id !== "empty-state") child.remove();
-  });
-  conversationHistory.length = 0;
-  setEmptyVisible(true);
+  [...el.chat.children].forEach(c => { if (c.id !== "welcome") c.remove(); });
+  history.length = 0;
+  el.welcome.style.display = "";
   toast("Chat cleared");
 }
 
-// ── Helpers ─────────────────────────────────────────────────────
-function setInputDisabled(v) {
-  ui.q.disabled = v;
-  ui.sendBtn.disabled = v;
-}
-function showBar(v) {
-  ui.modelBar.classList.toggle("model-bar--hidden", !v);
+// ── Helpers ───────────────────────────────────────────────────────
+function lockInput(v) {
+  el.msg.disabled    = v;
+  el.sendBtn.disabled = v;
 }
 function esc(s) {
-  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 function toast(msg) {
   const t = document.createElement("div");
@@ -360,51 +304,42 @@ function toast(msg) {
   setTimeout(() => t.remove(), 2000);
 }
 
-// ── Neural canvas ───────────────────────────────────────────────
+// ── Neural canvas ─────────────────────────────────────────────────
 function initCanvas() {
-  const canvas = document.getElementById("neural-canvas");
-  const ctx    = canvas?.getContext("2d");
+  const cv  = document.getElementById("neural-canvas");
+  const ctx = cv?.getContext("2d");
   if (!ctx) return;
-  const COUNT = window.innerWidth < 600 ? 20 : 38;
-  const MDIST = 120;
-  const nodes = [];
-  const resize = () => { canvas.width = window.innerWidth; canvas.height = window.innerHeight; };
+  const N   = window.innerWidth < 600 ? 20 : 38;
+  const D   = 120;
+  let nodes = [];
+  const resize = () => { cv.width = window.innerWidth; cv.height = window.innerHeight; };
   const spawn  = () => {
-    nodes.length = 0;
-    for (let i = 0; i < COUNT; i++) nodes.push({
-      x:  Math.random() * canvas.width,
-      y:  Math.random() * canvas.height,
-      vx: (Math.random() - 0.5) * 0.35,
-      vy: (Math.random() - 0.5) * 0.35,
-      r:  Math.random() * 1.8 + 0.7,
-    });
+    nodes = Array.from({ length: N }, () => ({
+      x:  Math.random() * cv.width,  y:  Math.random() * cv.height,
+      vx: (Math.random()-.5)*.35,    vy: (Math.random()-.5)*.35,
+      r:  Math.random()*1.8+.7,
+    }));
   };
   const draw = () => {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(0, 0, cv.width, cv.height);
     for (const n of nodes) {
       n.x += n.vx; n.y += n.vy;
-      if (n.x < 0 || n.x > canvas.width)  n.vx *= -1;
-      if (n.y < 0 || n.y > canvas.height) n.vy *= -1;
+      if (n.x < 0 || n.x > cv.width)  n.vx *= -1;
+      if (n.y < 0 || n.y > cv.height) n.vy *= -1;
     }
     for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
-        const d  = Math.sqrt(dx*dx + dy*dy);
-        if (d < MDIST) {
-          ctx.beginPath();
-          ctx.moveTo(nodes[i].x, nodes[i].y);
-          ctx.lineTo(nodes[j].x, nodes[j].y);
-          ctx.strokeStyle = `rgba(34,211,238,${(1 - d/MDIST) * 0.25})`;
-          ctx.lineWidth   = 0.6;
-          ctx.stroke();
+      for (let j = i+1; j < nodes.length; j++) {
+        const dx = nodes[i].x-nodes[j].x, dy = nodes[i].y-nodes[j].y;
+        const d  = Math.sqrt(dx*dx+dy*dy);
+        if (d < D) {
+          ctx.beginPath(); ctx.moveTo(nodes[i].x,nodes[i].y); ctx.lineTo(nodes[j].x,nodes[j].y);
+          ctx.strokeStyle = `rgba(34,211,238,${(1-d/D)*.22})`; ctx.lineWidth = .6; ctx.stroke();
         }
       }
     }
     for (const n of nodes) {
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(168,85,247,0.55)";
-      ctx.fill();
+      ctx.beginPath(); ctx.arc(n.x,n.y,n.r,0,Math.PI*2);
+      ctx.fillStyle = "rgba(168,85,247,.5)"; ctx.fill();
     }
     requestAnimationFrame(draw);
   };
@@ -412,54 +347,59 @@ function initCanvas() {
   window.addEventListener("resize", () => { resize(); spawn(); });
 }
 
-// ── Events ──────────────────────────────────────────────────────
+// ── Event listeners ───────────────────────────────────────────────
 function initEvents() {
-  ui.btnFast.addEventListener("click",  () => switchMode("fast"));
-  ui.btnSmart.addEventListener("click", () => switchMode("smart"));
+  // Mode buttons
+  el.btnFast.addEventListener("click",  () => switchMode("fast"));
+  el.btnSmart.addEventListener("click", () => switchMode("smart"));
 
-  // Send
-  const doSend = () => {
-    const q = ui.q.value.trim();
-    if (q && !isGenerating) {
-      ui.q.value = "";
-      ui.q.style.height = "auto";
-      ui.sendBtn.disabled = true;
-      generate(q);
+  // Clear
+  el.clearBtn.addEventListener("click", clearChat);
+
+  // Send on button click
+  el.sendBtn.addEventListener("click", doSend);
+
+  // Send on Enter (Shift+Enter = newline)
+  el.msg.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      doSend();
     }
-  };
-
-  ui.sendBtn.addEventListener("click", doSend);
-
-  ui.q.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doSend(); }
   });
 
-  // Auto-grow + enable send
-  ui.q.addEventListener("input", () => {
-    ui.sendBtn.disabled = ui.q.value.trim().length === 0 || isGenerating;
-    ui.q.style.height = "auto";
-    ui.q.style.height = Math.min(ui.q.scrollHeight, 160) + "px";
+  // Auto-grow textarea + enable/disable send button
+  el.msg.addEventListener("input", () => {
+    const hasText = el.msg.value.trim().length > 0;
+    el.sendBtn.disabled = !hasText || busy;
+    el.msg.style.height = "auto";
+    el.msg.style.height = Math.min(el.msg.scrollHeight, 150) + "px";
   });
 
   // Suggestion chips
-  document.querySelectorAll(".chip").forEach((chip) => {
+  document.querySelectorAll(".chip").forEach(chip => {
     chip.addEventListener("click", () => {
       const q = chip.dataset.q;
-      if (q && !isGenerating) generate(q);
+      if (q && !busy) generate(q);
     });
   });
-
-  ui.clearChat.addEventListener("click", clearChat);
 }
 
-// ── Boot ────────────────────────────────────────────────────────
+function doSend() {
+  const q = el.msg.value.trim();
+  if (!q || busy) return;
+  el.msg.value = "";
+  el.msg.style.height = "auto";
+  el.sendBtn.disabled = true;
+  generate(q);
+}
+
+// ── Boot ──────────────────────────────────────────────────────────
 async function boot() {
-  await detectWebGPU();
+  await detectGPU();
   initCanvas();
   initEvents();
-  setEmptyVisible(true);
-  // Preload fast model in background after 1s
-  setTimeout(() => loadModel("fast").catch(console.error), 1000);
+  // Start loading fast model silently after 1s
+  setTimeout(() => loadPipe("fast").catch(console.error), 1000);
 }
 
 boot();
