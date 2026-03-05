@@ -1,84 +1,61 @@
-import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers";
-
-let generator;
-let currentModel;
+let mode = "fast"
 
 const models = {
-  mini: "Xenova/all-MiniLM-L6-v2",
-  tiny: "Xenova/TinyLlama-1.1B-Chat-v1.0",
-  phi: "Xenova/phi-2"
-};
-
-function detectModel() {
-  const ram = navigator.deviceMemory || 4;
-  const cores = navigator.hardwareConcurrency || 4;
-
-  if (ram >= 12 && cores >= 8) return "phi";
-  if (ram >= 6) return "tiny";
-  return "mini";
+fast:"Xenova/SmolLM2-135M-Instruct",
+smart:"Xenova/Phi-3-mini-4k-instruct"
 }
 
-async function loadModel(type) {
+let generator
 
-  const label = document.getElementById("modelLabel");
-  const progress = document.getElementById("progress");
+async function loadModel(){
+document.getElementById("activeModel").innerText="Loading AI..."
 
-  label.innerText = "Loading AI model...";
-  progress.innerText = "Downloading model...";
+generator = await window.transformers.pipeline(
+"text-generation",
+models[mode]
+)
 
-  currentModel = models[type];
-
-  generator = await pipeline("text-generation", currentModel);
-
-  label.innerText = "Using AI: " + currentModel;
-  progress.innerText = "AI ready.";
+document.getElementById("activeModel").innerText=
+"Active AI: "+(mode==="fast"?"Fast ⚡":"Smart 🧠")
 }
 
-async function init() {
-
-  let selection = document.getElementById("modelSelect").value;
-
-  if (selection === "auto") {
-    selection = detectModel();
-  }
-
-  await loadModel(selection);
+function setMode(m){
+mode=m
+loadModel()
 }
 
-async function askAI() {
-
-  if (!generator) {
-    alert("AI still loading.");
-    return;
-  }
-
-  const chat = document.getElementById("chat");
-  const input = document.getElementById("prompt");
-
-  const text = input.value;
-
-  if (!text) return;
-
-  chat.innerHTML += `<div class="message user">You: ${text}</div>`;
-
-  input.value = "";
-
-  const result = await generator(text, { max_new_tokens: 80 });
-
-  chat.innerHTML += `<div class="message ai">AI: ${result[0].generated_text}</div>`;
-
-  chat.scrollTop = chat.scrollHeight;
+function addMessage(text,cls){
+const msg=document.createElement("div")
+msg.className="message "+cls
+msg.innerText=text
+document.getElementById("chat").appendChild(msg)
+msg.scrollIntoView()
 }
 
-document.getElementById("askBtn").addEventListener("click", askAI);
+async function sendMessage(){
 
-document.getElementById("prompt").addEventListener("keydown", function(e) {
-  if (e.key === "Enter") {
-    e.preventDefault();
-    askAI();
-  }
-});
+const input=document.getElementById("input")
+const text=input.value
+if(!text)return
 
-document.getElementById("modelSelect").addEventListener("change", init);
+addMessage(text,"user")
+input.value=""
 
-init();
+addMessage("Thinking...","ai")
+
+const result = await generator(text,{
+max_new_tokens:80
+})
+
+document.querySelectorAll(".ai").pop().innerText =
+result[0].generated_text
+}
+
+document.getElementById("send").onclick=sendMessage
+
+document.getElementById("input")
+.addEventListener("keypress",e=>{
+if(e.key==="Enter") sendMessage()
+})
+
+loadModel()
