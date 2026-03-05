@@ -1,1 +1,18 @@
+body{
+font-family:Arial;
+text-align:center;
+margin-top:100px;
+}
 
+input{
+width:300px;
+padding:10px;
+}
+
+button{
+padding:10px 20px;
+}
+
+select{
+padding:6px;
+}
