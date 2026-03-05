@@ -4,159 +4,114 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
   <meta name="theme-color" content="#050510" />
-  <meta name="description" content="BrainBoost AI — On-device AI. Zero cost. Fully private." />
   <title>BrainBoost AI</title>
-
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;700;800&family=JetBrains+Mono:wght@300;400;500&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="style.css" />
 </head>
 <body>
-
-  <!-- Ambient layers -->
   <canvas id="neural-canvas" aria-hidden="true"></canvas>
   <div class="noise-overlay" aria-hidden="true"></div>
-  <div class="orb orb--cyan"   aria-hidden="true"></div>
+  <div class="orb orb--cyan"  aria-hidden="true"></div>
   <div class="orb orb--purple" aria-hidden="true"></div>
 
   <div class="shell">
 
-    <!-- ╔══ HEADER ══╗ -->
-    <header class="header">
-      <div class="logo">
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <div class="topbar__left">
         <div class="logo-glyph" aria-hidden="true">
-          <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
-            <circle cx="16" cy="16" r="15" stroke="url(#lg1)" stroke-width="1.4"/>
-            <circle cx="16" cy="9"  r="3" fill="url(#lg2)"/>
-            <circle cx="9"  cy="20" r="3" fill="url(#lg2)"/>
-            <circle cx="23" cy="20" r="3" fill="url(#lg2)"/>
-            <line x1="16" y1="12" x2="9"  y2="17" stroke="url(#lg1)" stroke-width="1"/>
-            <line x1="16" y1="12" x2="23" y2="17" stroke="url(#lg1)" stroke-width="1"/>
-            <line x1="9"  y1="20" x2="23" y2="20" stroke="url(#lg1)" stroke-width="1"/>
+          <svg width="28" height="28" viewBox="0 0 32 32" fill="none">
+            <circle cx="16" cy="16" r="15" stroke="url(#lg1)" stroke-width="1.5"/>
+            <circle cx="16" cy="9"  r="2.8" fill="url(#lg2)"/>
+            <circle cx="9"  cy="20" r="2.8" fill="url(#lg2)"/>
+            <circle cx="23" cy="20" r="2.8" fill="url(#lg2)"/>
+            <line x1="16" y1="11.8" x2="9"  y2="17.2" stroke="url(#lg1)" stroke-width="1"/>
+            <line x1="16" y1="11.8" x2="23" y2="17.2" stroke="url(#lg1)" stroke-width="1"/>
+            <line x1="9"  y1="20"   x2="23" y2="20"   stroke="url(#lg1)" stroke-width="1"/>
             <defs>
               <linearGradient id="lg1" x1="0" y1="0" x2="32" y2="32" gradientUnits="userSpaceOnUse">
-                <stop stop-color="#22d3ee"/>
-                <stop offset="1" stop-color="#a855f7"/>
+                <stop stop-color="#22d3ee"/><stop offset="1" stop-color="#a855f7"/>
               </linearGradient>
               <linearGradient id="lg2" x1="0" y1="0" x2="1" y2="1">
-                <stop stop-color="#f59e0b"/>
-                <stop offset="1" stop-color="#f97316"/>
+                <stop stop-color="#f59e0b"/><stop offset="1" stop-color="#f97316"/>
               </linearGradient>
             </defs>
           </svg>
         </div>
-        <span class="logo-text">BrainBoost<span class="logo-ai"> AI</span></span>
+        <div class="topbar__title">
+          <span class="logo-text">BrainBoost<span class="logo-ai"> AI</span></span>
+          <span class="topbar__sub">Private · On-Device · Free</span>
+        </div>
       </div>
-      <div class="header-right">
-        <span class="pill pill--lock">🔒 On-Device</span>
-        <span class="pill pill--free">$0 Cost</span>
-        <span id="gpu-pill" class="pill pill--gpu" hidden>⚡ WebGPU</span>
+
+      <div class="topbar__right">
+        <div class="mode-toggle" role="group" aria-label="AI mode">
+          <button class="mode-btn mode-btn--active" id="btn-fast"  data-mode="fast"  aria-pressed="true">⚡ Fast</button>
+          <button class="mode-btn"                  id="btn-smart" data-mode="smart" aria-pressed="false">🧠 Smart</button>
+        </div>
+        <span id="gpu-pill" class="pill pill--gpu" hidden>⚡ GPU</span>
+        <button id="clear-chat" class="icon-btn" aria-label="Clear chat" title="Clear chat">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+            <path d="M2 4h12M6 4V2.5A1.5 1.5 0 017.5 1h1A1.5 1.5 0 0110 2.5V4M13 4l-.8 9.5A1 1 0 0111.2 14H4.8a1 1 0 01-1-.5L3 4"
+                  stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
       </div>
     </header>
 
-    <!-- ╔══ HERO ══╗ -->
-    <section class="hero">
-      <h1 class="hero-h1">Think <em>Smarter</em>,<br>Run <em>Privately</em></h1>
-      <p class="hero-sub">Real AI · Your browser · Zero cloud · Zero cost</p>
-    </section>
-
-    <!-- ╔══ MAIN CARD ══╗ -->
-    <div class="card">
-
-      <!-- Mode tabs -->
-      <div class="tabs" role="tablist" aria-label="AI mode">
-        <button class="tab tab--active" id="btn-fast"  role="tab" aria-selected="true"  data-mode="fast">
-          <span class="tab-icon">⚡</span>
-          <span class="tab-label">Fast</span>
-          <span class="tab-sub">LaMini-Flan-T5 · ~500 MB</span>
-        </button>
-        <button class="tab"             id="btn-smart" role="tab" aria-selected="false" data-mode="smart">
-          <span class="tab-icon">🧠</span>
-          <span class="tab-label">Smart</span>
-          <span class="tab-sub">TinyLlama Chat · ~600 MB</span>
-        </button>
-      </div>
-
-      <!-- Model status bar -->
-      <div id="model-bar" class="model-bar model-bar--hidden" aria-live="polite">
-        <div class="model-bar__row">
-          <span class="model-bar__dot"></span>
-          <span id="bar-text" class="model-bar__text">Loading…</span>
-          <span id="bar-pct" class="model-bar__pct"></span>
-        </div>
-        <div class="model-bar__track">
-          <div id="bar-fill" class="model-bar__fill"></div>
-        </div>
-      </div>
-
-      <!-- Input zone -->
-      <div class="input-zone">
-        <label for="q" class="sr-only">Your question</label>
-        <textarea
-          id="q"
-          class="q-input"
-          placeholder="Ask me anything… (Enter to send, Shift+Enter for new line)"
-          rows="3"
-          maxlength="800"
-          spellcheck="true"
-        ></textarea>
-        <div class="input-row">
-          <span id="qlen" class="q-len">0 / 800</span>
-          <button id="clear-q" class="ghost-btn" aria-label="Clear input" style="display:none">✕ Clear</button>
-          <button id="ask-btn" class="ask-btn" aria-label="Ask BrainBoost AI">
-            <span id="ask-label">Ask</span>
-            <svg class="ask-arrow" viewBox="0 0 18 18" fill="none">
-              <path d="M3 9h12M9 3l6 6-6 6" stroke="currentColor" stroke-width="1.6"
-                    stroke-linecap="round" stroke-linejoin="round"/>
-            </svg>
-            <div class="ask-shimmer"></div>
-          </button>
-        </div>
-      </div>
-
-      <!-- Response -->
-      <div id="resp-wrap" class="resp-wrap" style="display:none" aria-live="polite">
-        <div class="resp-header">
-          <span class="resp-from">
-            <span id="resp-icon">⚡</span>&nbsp;BrainBoost says
-          </span>
-          <button id="copy-btn" class="ghost-btn" aria-label="Copy response">⎘ Copy</button>
-        </div>
-        <div id="resp-dots" class="resp-dots" style="display:none">
-          <span></span><span></span><span></span>
-        </div>
-        <div id="resp-body" class="resp-body"></div>
-        <div id="resp-meta" class="resp-meta"></div>
-      </div>
-
-    </div><!-- /card -->
-
-    <!-- ╔══ TRUST STRIP ══╗ -->
-    <div class="trust-row">
-      <div class="trust-item">🔐&nbsp;All inference runs locally</div>
-      <div class="trust-item">💾&nbsp;Models cached after first load</div>
-      <div class="trust-item">🌐&nbsp;Offline-capable once loaded</div>
+    <!-- MODEL LOADING BAR -->
+    <div id="model-bar" class="model-bar model-bar--hidden" aria-live="polite">
+      <span class="model-bar__dot"></span>
+      <span id="bar-text"  class="model-bar__text">Loading…</span>
+      <div class="model-bar__track"><div id="bar-fill" class="model-bar__fill"></div></div>
+      <span id="bar-pct" class="model-bar__pct"></span>
     </div>
 
-    <!-- ╔══ FOOTER + SIGNATURE ══╗ -->
-    <footer class="footer">
-      <p class="footer-power">
-        Powered by <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener">🤗 Transformers.js</a>
-        &nbsp;·&nbsp; 100% client-side
-      </p>
-      <div class="sig-block">
-        <span class="sig-rule"></span>
-        <p class="sig-text">
-          <span class="sig-label">Crafted by</span>
-          <a class="sig-name" href="https://github.com" target="_blank" rel="noopener"
-             aria-label="Vrishab Varun">Vrishab Varun</a>
-        </p>
-        <span class="sig-rule"></span>
+    <!-- CHAT WINDOW -->
+    <main class="chat-window" id="chat-window" aria-label="Conversation" aria-live="polite">
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">🧠</div>
+        <h2 class="empty-title">Hey, I'm BrainBoost AI</h2>
+        <p class="empty-sub">Your private, on-device AI assistant.<br>Everything runs in your browser — nothing is sent anywhere.</p>
+        <div class="empty-chips">
+          <button class="chip" data-q="What can you help me with?">What can you help me with?</button>
+          <button class="chip" data-q="Explain how the internet works">Explain the internet</button>
+          <button class="chip" data-q="Write me a short poem about the ocean">Write a poem about the ocean</button>
+          <button class="chip" data-q="What is machine learning?">What is machine learning?</button>
+        </div>
+        <p class="empty-sig">Crafted by <strong class="sig-name">Vrishab Varun</strong></p>
       </div>
+    </main>
+
+    <!-- INPUT BAR -->
+    <div class="input-bar">
+      <div class="input-bar__inner">
+        <label for="q" class="sr-only">Message BrainBoost AI</label>
+        <textarea id="q" class="q-input" placeholder="Message BrainBoost AI…"
+                  rows="1" maxlength="600" spellcheck="true" aria-label="Your message"></textarea>
+        <button id="send-btn" class="send-btn" aria-label="Send" disabled>
+          <svg viewBox="0 0 20 20" fill="none" width="18" height="18">
+            <path d="M10 3v14M4 9l6-6 6 6" stroke="currentColor" stroke-width="1.8"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </div>
+      <p class="input-bar__hint">
+        <span id="mode-hint">⚡ Fast mode · Flan-T5</span>
+        &nbsp;·&nbsp; Enter to send · Shift+Enter for newline
+        &nbsp;·&nbsp; 🔒 100% private
+      </p>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="footer-sig">
+      Powered by <a href="https://huggingface.co/docs/transformers.js" target="_blank" rel="noopener">🤗 Transformers.js</a>
+      &nbsp;·&nbsp; Built by <span class="sig-name">Vrishab Varun</span>
     </footer>
 
-  </div><!-- /shell -->
+  </div>
 
   <script type="module" src="app.js"></script>
 </body>
