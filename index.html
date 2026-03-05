@@ -7,22 +7,37 @@
 
 <body>
 
+<div class="container">
+
 <h1>BrainBoost AI</h1>
 
-<p id="modelLabel">Loading AI...</p>
+<div class="topbar">
+<span id="modelLabel">Initializing AI...</span>
 
 <select id="modelSelect">
 <option value="auto">Auto</option>
-<option value="mini">Fast (Phone AI)</option>
-<option value="phi">Smart (Laptop AI)</option>
+<option value="mini">Fast</option>
+<option value="tiny">Balanced</option>
+<option value="phi">Smart</option>
 </select>
+</div>
 
-<br><br>
+<div id="chat"></div>
 
-<input id="prompt" placeholder="Ask anything...">
-<button onclick="askAI()">Ask</button>
+<div class="inputBar">
+<input id="prompt" placeholder="Ask BrainBoost anything...">
+<button id="askBtn">Send</button>
+</div>
 
-<p id="response"></p>
+<div id="progress"></div>
+
+<footer>
+BrainBoost AI • Built by Vrishab Varun  
+<br>
+© 2026 Vrishab Varun
+</footer>
+
+</div>
 
 <script type="module" src="app.js"></script>
 
