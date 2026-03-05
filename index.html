@@ -1,1 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>BrainBoost AI</title>
+<link rel="stylesheet" href="style.css">
+</head>
 
+<body>
+
+<h1>BrainBoost AI</h1>
+
+<p id="modelLabel">Loading AI...</p>
+
+<select id="modelSelect">
+<option value="auto">Auto</option>
+<option value="mini">Fast (Phone AI)</option>
+<option value="phi">Smart (Laptop AI)</option>
+</select>
+
+<br><br>
+
+<input id="prompt" placeholder="Ask anything...">
+<button onclick="askAI()">Ask</button>
+
+<p id="response"></p>
+
+<script type="module" src="app.js"></script>
+
+</body>
+</html>
