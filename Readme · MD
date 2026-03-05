@@ -1,0 +1,32 @@
+# 🧠 BrainBoost AI
+> Private chatbot · Runs entirely in your browser · Zero cost · by **Vrishab Varun**
+
+## What's new
+- 💬 Full chat UI with iMessage-style bubbles
+- 🧠 Conversation memory (remembers last 6 turns)
+- 🚀 Smarter models — LaMini-T5 (fast) + TinyLlama Chat (smart)
+- ✨ Quick-start chips on the welcome screen
+- 🗑 Clear conversation button
+
+## Models
+| Mode | Model | Size | Notes |
+|------|-------|------|-------|
+| ⚡ Fast | `Xenova/LaMini-Flan-T5-783M` | ~400 MB | Instruction-tuned, greedy decoding |
+| 🧠 Smart | `Xenova/TinyLlama-1.1B-Chat-v1.0` | ~600 MB | Chat-tuned, sampling |
+
+## Deploy to GitHub Pages
+```bash
+git init && git add . && git commit -m "BrainBoost AI"
+git remote add origin https://github.com/YOU/brainboost-ai.git
+git push -u origin main
+# GitHub → Settings → Pages → Branch: main / root
+```
+
+## Run locally
+```bash
+python3 -m http.server 8080
+# open http://localhost:8080
+```
+
+---
+*Crafted by Vrishab Varun · Powered by 🤗 Transformers.js*
